@@ -4,6 +4,15 @@ export function removeImageFullHeightRule(css: string): string {
   return css.replace(re, "");
 }
 
+export function appendIndentParagraphRule(
+  css: string,
+  className: string,
+): string {
+  const rule = `p.${className} {\n    line-height: 1.8;\n    text-indent: 1em;\n    font-size: inherit !important;\n}\n`;
+  const base = css.replace(/\s+$/, "");
+  return `${base}\n\n${rule}`;
+}
+
 export function removeColorDeclaration(css: string, target: string): string {
   const colorLike = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const declRe = new RegExp(

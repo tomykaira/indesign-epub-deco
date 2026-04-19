@@ -13,8 +13,17 @@ import { dirname, basename, extname, resolve, join } from "node:path";
 import { posix } from "node:path";
 
 import { log } from "./src/log.ts";
-import { magickAvailable, resizeImage, identifyImage } from "./src/image.ts";
-import { removeColorDeclaration, removeImageFullHeightRule } from "./src/css.ts";
+import {
+  magickAvailable,
+  resizeImage,
+  identifyImage,
+  readImageSize,
+} from "./src/image.ts";
+import {
+  removeColorDeclaration,
+  removeImageFullHeightRule,
+  appendIndentParagraphRule,
+} from "./src/css.ts";
 import { applyIndentDisable } from "./src/xhtml.ts";
 import { relocateImages, RelocError } from "./src/relocate.ts";
 import {
@@ -46,7 +55,7 @@ interface Config {
   epub: string;
   pre?: string[];
   post?: string[];
-  resize: number;
+  resize?: number | null;
   quality: number;
   indentSkipChars?: string;
   indentClassName?: string;
@@ -58,8 +67,12 @@ function loadConfig(path: string): Config {
   const text = readFileSync(path, "utf-8");
   const cfg = JSON.parse(text) as Config;
   if (!cfg.epub) throw new Error('config: "epub" is required');
-  if (typeof cfg.resize !== "number")
-    throw new Error('config: "resize" must be a number');
+  if (
+    cfg.resize !== undefined &&
+    cfg.resize !== null &&
+    typeof cfg.resize !== "number"
+  )
+    throw new Error('config: "resize" must be a number, null, or omitted');
   if (typeof cfg.quality !== "number")
     throw new Error('config: "quality" must be an integer');
   return cfg;
@@ -194,14 +207,18 @@ async function run(): Promise<void> {
   for (const p of [...prePaths, ...postPaths]) {
     if (!existsSync(p)) missing.push(p);
   }
+  const resizeEnabled =
+    config.resize !== undefined && config.resize !== null;
   const magickPath = config.magick;
-  const hasMagick = await magickAvailable(magickPath);
-  if (!hasMagick) {
-    missing.push(
-      magickPath
-        ? `magick (path not runnable: ${magickPath})`
-        : "magick (not on PATH)",
-    );
+  if (resizeEnabled) {
+    const hasMagick = await magickAvailable(magickPath);
+    if (!hasMagick) {
+      missing.push(
+        magickPath
+          ? `magick (path not runnable: ${magickPath})`
+          : "magick (not on PATH)",
+      );
+    }
   }
   if (missing.length > 0) {
     for (const m of missing) log.error(`missing: ${m}`);
@@ -272,6 +289,11 @@ async function run(): Promise<void> {
       if (cssOut2 !== cssOut) {
         log.info("css: removed img._idGenObjectAttribute-N height:100% rules");
         cssOut = cssOut2;
+      }
+      const cssOut3 = appendIndentParagraphRule(cssOut, indentClassName);
+      if (cssOut3 !== cssOut) {
+        log.info(`css: appended p.${indentClassName} rule`);
+        cssOut = cssOut3;
       }
       if (cssOut !== cssIn) {
         modifiedEntries.set(CSS_TARGET_PATH, cssOut);
@@ -348,9 +370,15 @@ async function run(): Promise<void> {
 
       const tmpFile = join(tmpRoot, imageBase);
       copyFileSync(sourcePath, tmpFile);
-      log.info(`resize: ${imageBase}`);
-      await resizeImage(tmpFile, config.resize, config.quality);
-      const dim = await identifyImage(tmpFile);
+      let dim: { width: number; height: number };
+      if (resizeEnabled) {
+        log.info(`resize: ${imageBase}`);
+        await resizeImage(tmpFile, config.resize as number, config.quality);
+        dim = await identifyImage(tmpFile);
+      } else {
+        log.info(`copy (no resize): ${imageBase}`);
+        dim = readImageSize(tmpFile);
+      }
 
       const imageBytes = new Uint8Array(readFileSync(tmpFile));
       newEntries.push({ name: imageZipPath, data: imageBytes });
