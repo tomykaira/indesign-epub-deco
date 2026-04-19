@@ -9,18 +9,17 @@ import {
   statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, basename, extname, resolve, sep, join } from "node:path";
+import { dirname, basename, extname, resolve, join } from "node:path";
 import { posix } from "node:path";
 
 import { log } from "./src/log.ts";
 import { magickAvailable, resizeImage, identifyImage } from "./src/image.ts";
-import { removeColorDeclaration } from "./src/css.ts";
+import { removeColorDeclaration, removeImageFullHeightRule } from "./src/css.ts";
 import { applyIndentDisable } from "./src/xhtml.ts";
 import { relocateImages, RelocError } from "./src/relocate.ts";
 import {
   loadEpub,
   readText,
-  readBytes,
   rebuildEpub,
   findOpfPath,
   exists as zipExists,
@@ -263,12 +262,19 @@ async function run(): Promise<void> {
     // §1 CSS
     if (zipExists(epub.zip, CSS_TARGET_PATH)) {
       const cssIn = await readText(epub.zip, CSS_TARGET_PATH);
-      const cssOut = removeColorDeclaration(cssIn, CSS_COLOR_TARGET);
+      let cssOut = removeColorDeclaration(cssIn, CSS_COLOR_TARGET);
       if (cssOut !== cssIn) {
-        modifiedEntries.set(CSS_TARGET_PATH, cssOut);
         log.info(`css: removed "color: ${CSS_COLOR_TARGET}" declarations`);
       } else {
-        log.info("css: no matching declarations");
+        log.info("css: no matching color declarations");
+      }
+      const cssOut2 = removeImageFullHeightRule(cssOut);
+      if (cssOut2 !== cssOut) {
+        log.info("css: removed img._idGenObjectAttribute-N height:100% rules");
+        cssOut = cssOut2;
+      }
+      if (cssOut !== cssIn) {
+        modifiedEntries.set(CSS_TARGET_PATH, cssOut);
       }
     } else {
       log.warn(`css not found: ${CSS_TARGET_PATH} (skipped)`);
@@ -437,37 +443,6 @@ async function run(): Promise<void> {
   }
 }
 
-function dispWidth(s: string): number {
-  let w = 0;
-  for (const ch of s) {
-    const c = ch.codePointAt(0)!;
-    const full =
-      (c >= 0x1100 && c <= 0x115f) ||
-      (c >= 0x2e80 && c <= 0x303e) ||
-      (c >= 0x3041 && c <= 0x33ff) ||
-      (c >= 0x3400 && c <= 0x4dbf) ||
-      (c >= 0x4e00 && c <= 0x9fff) ||
-      (c >= 0xa000 && c <= 0xa4cf) ||
-      (c >= 0xac00 && c <= 0xd7a3) ||
-      (c >= 0xf900 && c <= 0xfaff) ||
-      (c >= 0xfe30 && c <= 0xfe4f) ||
-      (c >= 0xff00 && c <= 0xff60) ||
-      (c >= 0xffe0 && c <= 0xffe6);
-    w += full ? 2 : 1;
-  }
-  return w;
-}
-
-function padRightW(s: string, width: number): string {
-  const pad = Math.max(0, width - dispWidth(s));
-  return s + " ".repeat(pad);
-}
-
-function padLeftW(s: string, width: number): string {
-  const pad = Math.max(0, width - dispWidth(s));
-  return " ".repeat(pad) + s;
-}
-
 function printRelocateSummary(
   summary: Array<{ file: string; moves: Array<{ index: number; page: number }> }>,
 ): void {
@@ -476,49 +451,14 @@ function printRelocateSummary(
     log.info("画像再配置: 対象なし");
     return;
   }
-
-  const headerFile = "xhtml";
-  const headerCount = "移動件数";
-  const headerPages = "配置先ページ";
-  const totalLabel = "合計";
-  const total = rows.reduce((a, r) => a + r.moves.length, 0);
-
-  let fileW = dispWidth(headerFile);
-  let countW = dispWidth(headerCount);
-  let pagesW = dispWidth(headerPages);
-  for (const r of rows) {
-    fileW = Math.max(fileW, dispWidth(r.file));
-    countW = Math.max(countW, dispWidth(String(r.moves.length)));
-    pagesW = Math.max(
-      pagesW,
-      dispWidth(r.moves.map((m) => String(m.page)).join(", ")),
-    );
-  }
-  fileW = Math.max(fileW, dispWidth(totalLabel));
-  countW = Math.max(countW, dispWidth(String(total)));
-
-  const sep =
-    "-".repeat(fileW + 2) +
-    "+" +
-    "-".repeat(countW + 2) +
-    "+" +
-    "-".repeat(pagesW + 2);
-
   log.info("画像再配置の結果:");
-  log.info(
-    `  ${padRightW(headerFile, fileW)} | ${padLeftW(headerCount, countW)} | ${padRightW(headerPages, pagesW)}`,
-  );
-  log.info(`  ${sep}`);
+  let total = 0;
   for (const r of rows) {
-    const pages = r.moves.map((m) => String(m.page)).join(", ");
-    log.info(
-      `  ${padRightW(r.file, fileW)} | ${padLeftW(String(r.moves.length), countW)} | ${padRightW(pages, pagesW)}`,
-    );
+    const pages = r.moves.map((m) => m.page).join(", ");
+    log.info(`  ${r.file}: ${r.moves.length}件 (${pages})`);
+    total += r.moves.length;
   }
-  log.info(`  ${sep}`);
-  log.info(
-    `  ${padRightW(totalLabel, fileW)} | ${padLeftW(String(total), countW)} | ${padRightW("", pagesW)}`,
-  );
+  log.info(`  合計: ${total}件`);
 }
 
 run().catch((e) => {

@@ -49,7 +49,7 @@ interface Elem {
 function parseAttrs(s: string): Record<string, string> {
   const attrs: Record<string, string> = {};
   const re =
-    /([a-zA-Z_:][\w:.\-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
+    /([a-zA-Z_:][\w:.-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s)) !== null) {
     const name = m[1]!;

@@ -54,17 +54,8 @@ function findPackage(tree: OpfTree): Node {
   throw new Error("content.opf: <package> not found");
 }
 
-function getAttrs(node: Node): Record<string, string> {
-  if (!node[":@"]) node[":@"] = {};
-  return node[":@"]!;
-}
-
 function attr(node: Node, name: string): string | undefined {
   return node[":@"]?.[`@_${name}`];
-}
-
-function setAttr(node: Node, name: string, value: string): void {
-  getAttrs(node)[`@_${name}`] = value;
 }
 
 export interface ManifestItem {
